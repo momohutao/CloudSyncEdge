@@ -102,3 +102,11 @@ class CommandStatus:
     FAILED = "failed"  # 失败
     TIMEOUT = "timeout"  # 超时
     CANCELLED = "cancelled"  # 取消
+# 添加南向特定的消息类型
+class SouthboundMessageTypes:
+    DEVICE_CONNECT = "device_connect"
+    DEVICE_DISCONNECT = "device_disconnect"
+    DEVICE_AUTH = "device_auth"
+    DEVICE_HEARTBEAT = "device_heartbeat"
+    DEVICE_DATA = "device_data"
+    COMMAND_TO_DEVICE = "command_to_device"
