@@ -1,15 +1,14 @@
 """
 ECU工厂类 - 负责创建和管理ECU设备实例
+简化版本
 """
+import asyncio
 import logging
 from typing import Dict, List, Optional, Type
 from enum import Enum
-import importlib
-
-from CloudSyncEdge.src.protocol.message_types import DeviceTypes, MessageTypes
 
 from .base_ecu import BaseECU, ECUConfig
-from ..devices.shared_bike import SharedBikeECU
+from ..devices.shared_bike_ecu import SharedBikeECU  # 修正：使用正确的文件名
 from ..devices.door_access import DoorAccessECU
 from ..database.client import DatabaseClient
 
@@ -23,6 +22,17 @@ class DeviceCategory(Enum):
     UTILITY = "utility"                # 公用设备
     INDUSTRIAL = "industrial"          # 工业设备
     CONSUMER = "consumer"              # 消费设备
+
+
+# 设备类型常量
+class DeviceTypes:
+    SHARED_BIKE = "shared_bike"
+    ACCESS_CONTROL = "door_access"
+    SMART_METER = "smart_meter"
+    IOT_GATEWAY = "iot_gateway"
+    VEHICLE_ECU = "vehicle_ecu"
+    SMART_LOCK = "smart_lock"
+    ENVIRONMENT_SENSOR = "environment_sensor"
 
 
 class ECUFactory:
@@ -43,7 +53,7 @@ class ECUFactory:
         # 注册内置设备类型
         cls.register_device_type(
             device_type=DeviceTypes.SHARED_BIKE,
-            device_class=SharedBikeECU,
+            device_class=SharedBikeECU,  # 这里使用正确的类名
             category=DeviceCategory.TRANSPORTATION,
             config_template={
                 "heartbeat_interval": 30,
@@ -108,46 +118,7 @@ class ECUFactory:
         cls._device_categories[device_type] = category
         cls._device_config_templates[device_type] = config_template
         
-        logger.debug(f"注册设备类型: {device_type} -> {device_class.__name__ if device_class else 'GenericECU'}")
-    
-    @classmethod
-    def unregister_device_type(cls, device_type: str) -> bool:
-        """注销设备类型"""
-        if device_type in cls._device_registry:
-            del cls._device_registry[device_type]
-            del cls._device_categories[device_type]
-            del cls._device_config_templates[device_type]
-            
-            logger.info(f"注销设备类型: {device_type}")
-            return True
-        return False
-    
-    @classmethod
-    def register_custom_device_type(cls, device_type: str, module_path: str, class_name: str,
-                                   category: DeviceCategory, config_template: Dict) -> bool:
-        """注册自定义设备类型"""
-        try:
-            # 动态导入模块
-            module = importlib.import_module(module_path)
-            device_class = getattr(module, class_name)
-            
-            if not issubclass(device_class, BaseECU):
-                logger.error(f"类 {class_name} 不是 BaseECU 的子类")
-                return False
-            
-            cls.register_device_type(device_type, device_class, category, config_template)
-            logger.info(f"注册自定义设备类型: {device_type} -> {class_name}")
-            return True
-            
-        except ImportError as e:
-            logger.error(f"导入模块失败: {module_path}: {e}")
-            return False
-        except AttributeError as e:
-            logger.error(f"找不到类: {class_name} in {module_path}: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"注册自定义设备类型失败: {e}")
-            return False
+        logger.debug(f"注册设备类型: {device_type}")
     
     @classmethod
     def create_ecu(cls, config: ECUConfig, db_client: Optional[DatabaseClient] = None) -> Optional[BaseECU]:
@@ -172,7 +143,6 @@ class ECUFactory:
             
             if device_class is None:
                 # 使用通用ECU
-                from .base_ecu import BaseECU
                 device_class = BaseECU
             
             # 创建设备实例
@@ -234,41 +204,9 @@ class ECUFactory:
             return None
     
     @classmethod
-    def batch_create_ecus(cls, ecu_list: List[Dict], db_client: Optional[DatabaseClient] = None) -> List[BaseECU]:
-        """批量创建ECU设备"""
-        ecus = []
-        
-        for ecu_data in ecu_list:
-            ecu = cls.create_ecu_from_dict(ecu_data, db_client)
-            if ecu:
-                ecus.append(ecu)
-        
-        logger.info(f"批量创建 {len(ecus)}/{len(ecu_list)} 个ECU设备")
-        return ecus
-    
-    @classmethod
     def get_device_class(cls, device_type: str) -> Optional[Type[BaseECU]]:
         """获取设备类"""
         return cls._device_registry.get(device_type)
-    
-    @classmethod
-    def get_device_category(cls, device_type: str) -> Optional[DeviceCategory]:
-        """获取设备分类"""
-        return cls._device_categories.get(device_type)
-    
-    @classmethod
-    def get_config_template(cls, device_type: str) -> Dict:
-        """获取配置模板"""
-        return cls._device_config_templates.get(device_type, {}).copy()
-    
-    @classmethod
-    def update_config_template(cls, device_type: str, template_updates: Dict) -> bool:
-        """更新配置模板"""
-        if device_type in cls._device_config_templates:
-            cls._device_config_templates[device_type].update(template_updates)
-            logger.info(f"更新配置模板: {device_type}")
-            return True
-        return False
     
     @classmethod
     def list_device_types(cls, category: Optional[DeviceCategory] = None) -> List[str]:
@@ -279,89 +217,6 @@ class ECUFactory:
                 if device_category == category
             ]
         return list(cls._device_registry.keys())
-    
-    @classmethod
-    def list_device_categories(cls) -> Dict[DeviceCategory, List[str]]:
-        """列出设备分类及其类型"""
-        categories = {}
-        
-        for device_type, category in cls._device_categories.items():
-            if category not in categories:
-                categories[category] = []
-            categories[category].append(device_type)
-        
-        return categories
-    
-    @classmethod
-    def validate_device_config(cls, ecu_id: str, device_type: str, config: Dict) -> Dict:
-        """验证设备配置"""
-        errors = []
-        warnings = []
-        
-        # 基本验证
-        if not ecu_id or len(ecu_id) > 64:
-            errors.append("ecu_id不能为空且长度不能超过64字符")
-        
-        if device_type not in cls._device_registry:
-            errors.append(f"未知的设备类型: {device_type}")
-        else:
-            # 获取配置模板
-            template = cls.get_config_template(device_type)
-            
-            # 验证必填字段
-            required_fields = ["heartbeat_interval", "command_timeout"]
-            for field in required_fields:
-                if field not in config:
-                    config[field] = template.get(field)
-            
-            # 验证数值范围
-            if "heartbeat_interval" in config:
-                interval = config["heartbeat_interval"]
-                if interval < 10 or interval > 300:
-                    warnings.append(f"心跳间隔{interval}秒可能不合适，建议10-300秒")
-            
-            if "command_timeout" in config:
-                timeout = config["command_timeout"]
-                if timeout < 1 or timeout > 60:
-                    warnings.append(f"命令超时{timeout}秒可能不合适，建议1-60秒")
-        
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "suggested_config": config
-        }
-    
-    @classmethod
-    async def create_and_start_ecu(cls, ecu_data: Dict, db_client: Optional[DatabaseClient] = None) -> Optional[BaseECU]:
-        """创建并启动ECU设备"""
-        try:
-            ecu = cls.create_ecu_from_dict(ecu_data, db_client)
-            if not ecu:
-                return None
-            
-            await ecu.start()
-            logger.info(f"ECU设备创建并启动: {ecu.ecu_id}")
-            return ecu
-            
-        except Exception as e:
-            logger.error(f"创建并启动ECU失败: {e}")
-            return None
-    
-    @classmethod
-    def get_statistics(cls) -> Dict:
-        """获取工厂统计信息"""
-        total_types = len(cls._device_registry)
-        categories = cls.list_device_categories()
-        
-        category_counts = {cat.value: len(types) for cat, types in categories.items()}
-        
-        return {
-            "total_device_types": total_types,
-            "category_distribution": category_counts,
-            "registered_types": cls.list_device_types(),
-            "config_templates_available": len(cls._device_config_templates)
-        }
 
 
 # 创建工厂实例
@@ -394,7 +249,7 @@ class DeviceCreator:
                 "config": config_overrides or {}
             }
             
-            ecu = await self.factory.create_and_start_ecu(ecu_data, db_client)
+            ecu = self.factory.create_ecu_from_dict(ecu_data, db_client)
             if ecu:
                 self.created_devices.append(ecu)
             
@@ -403,121 +258,3 @@ class DeviceCreator:
         except Exception as e:
             logger.error(f"创建设备失败: {ecu_id}: {e}")
             return None
-    
-    async def create_multiple_devices(self, device_specs: List[Dict], 
-                                     db_client: Optional[DatabaseClient] = None) -> List[BaseECU]:
-        """创建多个设备"""
-        tasks = []
-        
-        for spec in device_specs:
-            ecu_id = spec.get("ecu_id")
-            device_type = spec.get("device_type")
-            config = spec.get("config", {})
-            
-            if ecu_id and device_type:
-                task = self.create_device(ecu_id, device_type, config, db_client)
-                tasks.append(task)
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        successful_devices = []
-        for result in results:
-            if isinstance(result, BaseECU):
-                successful_devices.append(result)
-            elif isinstance(result, Exception):
-                logger.error(f"创建设备失败: {result}")
-        
-        return successful_devices
-    
-    async def cleanup(self):
-        """清理所有创建的设备"""
-        cleanup_tasks = []
-        
-        for ecu in self.created_devices:
-            if ecu.status.value != "offline":
-                cleanup_tasks.append(ecu.stop())
-        
-        if cleanup_tasks:
-            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-        
-        self.created_devices.clear()
-        logger.info(f"清理了 {len(cleanup_tasks)} 个设备")
-
-
-# =============== 使用示例 ===============
-
-async def demo_ecu_factory():
-    """演示ECU工厂使用"""
-    print("🚀 演示ECU工厂使用...")
-    
-    try:
-        # 获取工厂实例
-        factory = get_ecu_factory()
-        
-        # 列出所有设备类型
-        device_types = factory.list_device_types()
-        print(f"✅ 可用设备类型: {len(device_types)} 种")
-        for dtype in device_types:
-            print(f"  - {dtype}")
-        
-        # 按分类列出
-        categories = factory.list_device_categories()
-        print(f"\n✅ 设备分类:")
-        for category, types in categories.items():
-            print(f"  {category.value}: {len(types)} 种类型")
-        
-        # 创建设备
-        creator = DeviceCreator(factory)
-        
-        # 创建共享单车
-        bike = await creator.create_device(
-            ecu_id="demo_bike_001",
-            device_type=DeviceTypes.SHARED_BIKE,
-            config_overrides={"heartbeat_interval": 25}
-        )
-        
-        if bike:
-            print(f"✅ 创建共享单车: {bike.ecu_id}")
-            
-            # 获取设备状态
-            status = bike.get_status_dict()
-            print(f"✅ 设备状态: {status['status']}")
-            
-            # 执行命令
-            result = await bike.execute_command(MessageTypes.GET_STATUS, {})
-            print(f"✅ 执行命令: {result.get('success')}")
-        
-        # 创建门禁设备
-        door = await creator.create_device(
-            ecu_id="demo_door_001",
-            device_type=DeviceTypes.ACCESS_CONTROL,
-            config_overrides={"command_timeout": 5}
-        )
-        
-        if door:
-            print(f"✅ 创建门禁设备: {door.ecu_id}")
-        
-        # 批量创建设备
-        device_specs = [
-            {"ecu_id": "demo_bike_002", "device_type": DeviceTypes.SHARED_BIKE},
-            {"ecu_id": "demo_door_002", "device_type": DeviceTypes.ACCESS_CONTROL},
-        ]
-        
-        devices = await creator.create_multiple_devices(device_specs)
-        print(f"✅ 批量创建: {len(devices)} 个设备")
-        
-        # 获取工厂统计
-        stats = factory.get_statistics()
-        print(f"✅ 工厂统计: {stats}")
-        
-        # 清理
-        await creator.cleanup()
-        print("🎉 ECU工厂演示完成")
-        
-    except Exception as e:
-        print(f"❌ 演示失败: {e}")
-
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(demo_ecu_factory())

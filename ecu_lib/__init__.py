@@ -1,51 +1,47 @@
 """
-ECU设备库
+ECU库主模块 - 成员A
+简化版本，只包含必要的导出
 """
 
-from .core.base_ecu import BaseECU, ECUConfig, ECUStatus, ECUCommand
-from .core.ecu_factory import ECUFactory
-from .core.ecu_simulator import ECUSimulator
+# 核心模块
+from .core.base_ecu import BaseECU, ECUConfig, ECUStatus, ECUCommand, CommandResult
+from .core.ecu_factory import ECUFactory, get_ecu_factory
 
-from .devices.shared_bike import SharedBikeECU
-from .devices.door_access import DoorAccessECU
-from .devices.device_registry import DeviceRegistry
+# 接口模块
+from .interfaces.ecu_interface import ECUInterface, DefaultECUInterface
 
+# 数据库模块
 from .database.client import DatabaseClient
-from .database.models import ECUDeviceModel, ECUStatusModel
-from .database.batch_writer import BatchWriter
+from .database.ecu_device_dao import ECUDeviceDAO
 
-from .interface.ecu_interface import ECUInterface
-from .interface.device_manager import DeviceManagerInterface
+# 设备模块
+from .devices.device_registry import DeviceRegistry, get_device_registry
 
-from .mock.mock_manager import MockDeviceManager
-
-__version__ = "1.0.0"
-__author__ = "Team A - ECU Library"
+# 共享工具
+from .shared.database import SimpleDB
 
 __all__ = [
-    # 核心类
+    # 核心
     'BaseECU',
-    'ECUConfig',
+    'ECUConfig', 
     'ECUStatus',
     'ECUCommand',
+    'CommandResult',
     'ECUFactory',
-    'ECUSimulator',
-    
-    # 设备实现
-    'SharedBikeECU',
-    'DoorAccessECU',
-    'DeviceRegistry',
-    
-    # 数据库
-    'DatabaseClient',
-    'ECUDeviceModel',
-    'ECUStatusModel',
-    'BatchWriter',
+    'get_ecu_factory',
     
     # 接口
     'ECUInterface',
-    'DeviceManagerInterface',
+    'DefaultECUInterface',
     
-    # Mock
-    'MockDeviceManager',
+    # 数据库
+    'DatabaseClient',
+    'ECUDeviceDAO',
+    
+    # 设备
+    'DeviceRegistry',
+    'get_device_registry',
+    
+    # 工具
+    'SimpleDB'
 ]

@@ -1,31 +1,9 @@
 """
-数据库模块
+数据库模块 - 成员A专用的数据库工具
+只操作 ecu_devices 表
 """
 
 from .client import DatabaseClient
-from .models import (
-    Base,
-    ECUDeviceModel,
-    ECUStatusHistory,
-    CommandExecutionLog,
-    HeartbeatLog,
-    AccessEventLog,
-    RideRecord
-)
-from .batch_writer import BatchWriter, PriorityBatchWriter
+from .ecu_device_dao import ECUDeviceDAO
 
-__version__ = "1.0.0"
-__author__ = "Team A - Database Module"
-
-__all__ = [
-    'DatabaseClient',
-    'Base',
-    'ECUDeviceModel',
-    'ECUStatusHistory',
-    'CommandExecutionLog',
-    'HeartbeatLog',
-    'AccessEventLog',
-    'RideRecord',
-    'BatchWriter',
-    'PriorityBatchWriter'
-]
+__all__ = ['DatabaseClient', 'ECUDeviceDAO']

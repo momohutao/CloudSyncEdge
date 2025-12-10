@@ -6,8 +6,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# 添加项目根目录
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 try:
     import websockets
@@ -18,11 +17,14 @@ except ImportError:
     HAS_WEBSOCKETS = False
     print("⚠️ 未安装websockets库，WebSocket功能不可用")
 
-from protocol.message_types import MessageTypes, DeviceTypes, ErrorCodes
-from ecu_lib.interface.ecu_interface import ECUInterface
+from ..src.protocol.message_types import MessageTypes, DeviceTypes, ErrorCodes
+from ..ecu_lib.interfaces.ecu_interface import ECUInterface
 from .database import init_database, get_database_client
 from .interface_impl import SouthboundInterfaceImpl
-
+# 导入必要的依赖
+from ..ecu_lib.interfaces.ecu_interface import DefaultECUInterface
+# 需要先创建 DeviceRegistry 实例
+from ..ecu_lib.devices.device_registry import DeviceRegistry
 
 class SouthboundWebSocketServer:
     """南向WebSocket服务器"""
@@ -31,15 +33,17 @@ class SouthboundWebSocketServer:
         self.host = host
         self.port = port
         self.server = None
-
-        # 依赖成员A的接口
-        self.ecu_interface = ECUInterface()
-
+        device_registry = DeviceRegistry()
         # 南向接口实现（供成员C调用）
         self.southbound_interface = SouthboundInterfaceImpl(self)
-
         # 数据库客户端
         self.db_client = None
+        # ECU接口 - 先设置为 None，在 initialize 方法中创建
+        self.ecu_interface = None
+
+        # 依赖成员A的接口
+        self.ecu_interface = DefaultECUInterface(device_registry, self.db_client)
+
 
         # 活跃连接
         self.active_connections: Dict[str, WebSocketServerProtocol] = {}
@@ -59,6 +63,15 @@ class SouthboundWebSocketServer:
         # 初始化数据库
         await init_database()
         self.db_client = get_database_client()
+
+        from ..ecu_lib.devices.device_registry import DeviceRegistry
+        from ..ecu_lib.interfaces.ecu_interface import DefaultECUInterface
+
+        device_registry = DeviceRegistry()  # 可能需要传递参数
+        self.ecu_interface = DefaultECUInterface(device_registry, self.db_client)
+
+        # 更新 southbound_interface 的引用
+        self.southbound_interface.ecu_interface = self.ecu_interface
 
         print("✅ 南向服务器初始化完成")
 
@@ -273,7 +286,7 @@ class SouthboundWebSocketServer:
 
 async def main():
     """主函数"""
-    server = SouthboundWebSocketServer("0.0.0.0", 8081)
+    server = SouthboundWebSocketServer("0.0.0.0", 8082)
 
     try:
         await server.start()

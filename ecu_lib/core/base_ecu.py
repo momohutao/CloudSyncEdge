@@ -11,9 +11,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Callable, Awaitable
 from collections import deque
 
-# 导入D成员的协议
-from protocol.jsonrpc import JSONRPCRequest, JSONRPCResponse
-from protocol.message_types import MessageTypes, ErrorCodes, DeviceStatus as ProtocolDeviceStatus
+# 导入数据库
+from ..shared.database import SimpleDB
+from ..database.ecu_device_dao import ECUDeviceDAO
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +101,6 @@ class BaseECU(ABC):
         
         # 回调函数
         self._status_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
-        # status_callbacks 是一个列表，存放所有状态回调函数
-        # 每个回调函数必须：
-        # 1. 接受一个字典参数
-        # 2. 是异步函数（async def）
-        # 3. 不返回值（返回 None）
-
         self._command_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
         
         # 统计信息
@@ -124,7 +118,22 @@ class BaseECU(ABC):
         # 设备属性
         self._attributes: Dict[str, Any] = {}
         
-        logger.info(f"ECU {self.ecu_id} ({self.device_type}) initialized")
+        # 注册设备到数据库
+        asyncio.create_task(self._register_to_database())
+        
+        logger.info(f"ECU {self.ecu_id} ({self.device_type}) 初始化完成")
+    
+    async def _register_to_database(self):
+        """注册设备到数据库"""
+        try:
+            await ECUDeviceDAO.register_device(
+                ecu_id=self.ecu_id,
+                device_type=self.device_type,
+                device_name=f"{self.device_type}_{self.ecu_id}"
+            )
+            logger.info(f"ECU {self.ecu_id} 注册到数据库")
+        except Exception as e:
+            logger.error(f"注册到数据库失败: {e}")
     
     @property
     def status(self) -> ECUStatus:
@@ -138,19 +147,21 @@ class BaseECU(ABC):
         self._status = value
         
         if old_status != value:
-            logger.info(f"ECU {self.ecu_id} status changed: {old_status.value} -> {value.value}")
-            self._notify_status_change()
+            logger.info(f"ECU {self.ecu_id} 状态变更: {old_status.value} -> {value.value}")
+            asyncio.create_task(self._notify_status_change())
     
     async def _notify_status_change(self):
         """通知状态变更"""
         status_info = self.get_status_dict()
         
-        # 保存到数据库
-        if self.db_client and self.config.enable_logging:
-            try:
-                await self.db_client.save_ecu_status(self.ecu_id, status_info)
-            except Exception as e:
-                logger.error(f"保存状态到数据库失败: {e}")
+        try:
+            # 更新数据库状态
+            await ECUDeviceDAO.update_device_status(
+                ecu_id=self.ecu_id,
+                status=self.status.value
+            )
+        except Exception as e:
+            logger.error(f"更新数据库状态失败: {e}")
         
         # 调用回调函数
         for callback in self._status_callbacks:
@@ -191,7 +202,7 @@ class BaseECU(ABC):
             self.status = ECUStatus.ONLINE
             self._processing_task = asyncio.create_task(self._process_commands())
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-            logger.info(f"ECU {self.ecu_id} started")
+            logger.info(f"ECU {self.ecu_id} 启动")
     
     async def stop(self):
         """停止ECU"""
@@ -213,7 +224,7 @@ class BaseECU(ABC):
                 pass
             self._heartbeat_task = None
         
-        logger.info(f"ECU {self.ecu_id} stopped")
+        logger.info(f"ECU {self.ecu_id} 停止")
     
     async def execute_command(self, command: str, params: Optional[Dict] = None) -> Dict:
         """执行命令（异步）"""
@@ -223,13 +234,13 @@ class BaseECU(ABC):
             # 检查设备状态
             if self.status == ECUStatus.OFFLINE:
                 return self._create_error_response(
-                    ErrorCodes.DEVICE_OFFLINE,
+                    1002,  # DEVICE_OFFLINE
                     "Device is offline"
                 )
             
             if self.status == ECUStatus.BUSY:
                 return self._create_error_response(
-                    ErrorCodes.DEVICE_BUSY,
+                    1003,  # DEVICE_BUSY
                     "Device is busy"
                 )
             
@@ -255,21 +266,19 @@ class BaseECU(ABC):
                 return result
             except asyncio.TimeoutError:
                 return self._create_error_response(
-                    ErrorCodes.COMMAND_TIMEOUT,
+                    1008,  # COMMAND_TIMEOUT
                     f"Command timeout after {timeout}s"
                 )
                 
         except Exception as e:
             logger.error(f"执行命令失败: {e}")
             return self._create_error_response(
-                ErrorCodes.INTERNAL_ERROR,
+                1004,  # INTERNAL_ERROR
                 f"Command execution failed: {str(e)}"
             )
     
     async def _wait_for_command_result(self, command_id: str) -> Dict:
         """等待命令结果"""
-        # 这里可以扩展为使用事件或回调机制
-        # 简化实现：直接执行命令
         try:
             # 从队列中获取命令
             command_data = await self._command_queue.get()
@@ -284,7 +293,7 @@ class BaseECU(ABC):
         except Exception as e:
             logger.error(f"等待命令结果失败: {e}")
             return self._create_error_response(
-                ErrorCodes.INTERNAL_ERROR,
+                1004,  # INTERNAL_ERROR
                 f"Failed to wait for command result: {str(e)}"
             )
     
@@ -297,17 +306,17 @@ class BaseECU(ABC):
         
         try:
             # 根据命令类型执行
-            if command == MessageTypes.LOCK:
+            if command == "lock":
                 result = await self._execute_lock(params)
-            elif command == MessageTypes.UNLOCK:
+            elif command == "unlock":
                 result = await self._execute_unlock(params)
-            elif command == MessageTypes.GET_STATUS:
+            elif command == "get_status":
                 result = await self._execute_get_status(params)
-            elif command == MessageTypes.UPDATE_CONFIG:
+            elif command == "update_config":
                 result = await self._execute_update_config(params)
-            elif command == MessageTypes.REBOOT:
+            elif command == "reboot":
                 result = await self._execute_reboot(params)
-            elif command == MessageTypes.FIRMWARE_UPDATE:
+            elif command == "firmware_update":
                 result = await self._execute_firmware_update(params)
             else:
                 result = await self._execute_custom_command(command, params)
@@ -317,6 +326,12 @@ class BaseECU(ABC):
                 self._stats["commands_executed"] += 1
             else:
                 self._stats["commands_failed"] += 1
+            
+            # 更新数据库最后在线时间
+            try:
+                await ECUDeviceDAO.update_device_status(self.ecu_id, self.status.value)
+            except Exception as e:
+                logger.error(f"更新数据库失败: {e}")
             
             return result
             
@@ -331,7 +346,7 @@ class BaseECU(ABC):
             })
             
             return self._create_error_response(
-                ErrorCodes.INTERNAL_ERROR,
+                1004,  # INTERNAL_ERROR
                 f"Command execution exception: {str(e)}"
             )
     
@@ -364,7 +379,7 @@ class BaseECU(ABC):
         except Exception as e:
             return {
                 "success": False,
-                "error_code": ErrorCodes.INVALID_PARAMS,
+                "error_code": 1005,  # INVALID_PARAMS
                 "error_message": f"Invalid configuration: {str(e)}"
             }
     
@@ -389,7 +404,7 @@ class BaseECU(ABC):
         except Exception as e:
             return {
                 "success": False,
-                "error_code": ErrorCodes.INTERNAL_ERROR,
+                "error_code": 1004,  # INTERNAL_ERROR
                 "error_message": f"Reboot failed: {str(e)}"
             }
     
@@ -418,7 +433,7 @@ class BaseECU(ABC):
             self.status = ECUStatus.ERROR
             return {
                 "success": False,
-                "error_code": ErrorCodes.FIRMWARE_ERROR,
+                "error_code": 1011,  # FIRMWARE_ERROR
                 "error_message": f"Firmware update failed: {str(e)}"
             }
     
@@ -427,13 +442,13 @@ class BaseECU(ABC):
         # 子类可以重写此方法以支持更多命令
         return {
             "success": False,
-            "error_code": ErrorCodes.METHOD_NOT_FOUND,
+            "error_code": 1009,  # METHOD_NOT_FOUND
             "error_message": f"Command '{command}' not supported"
         }
     
     async def _process_commands(self):
         """处理命令队列"""
-        logger.info(f"ECU {self.ecu_id} command processor started")
+        logger.info(f"ECU {self.ecu_id} 命令处理器启动")
         
         try:
             while self.status != ECUStatus.OFFLINE:
@@ -463,15 +478,15 @@ class BaseECU(ABC):
                     continue
                     
         except asyncio.CancelledError:
-            logger.info(f"ECU {self.ecu_id} command processor cancelled")
+            logger.info(f"ECU {self.ecu_id} 命令处理器取消")
         except Exception as e:
             logger.error(f"命令处理器异常退出: {e}")
         finally:
-            logger.info(f"ECU {self.ecu_id} command processor stopped")
+            logger.info(f"ECU {self.ecu_id} 命令处理器停止")
     
     async def _heartbeat_loop(self):
         """心跳循环"""
-        logger.info(f"ECU {self.ecu_id} heartbeat loop started")
+        logger.info(f"ECU {self.ecu_id} 心跳循环启动")
         
         interval = self.config.heartbeat_interval
         
@@ -483,11 +498,11 @@ class BaseECU(ABC):
                     await self._send_heartbeat()
                     
         except asyncio.CancelledError:
-            logger.info(f"ECU {self.ecu_id} heartbeat loop cancelled")
+            logger.info(f"ECU {self.ecu_id} 心跳循环取消")
         except Exception as e:
             logger.error(f"心跳循环异常: {e}")
         finally:
-            logger.info(f"ECU {self.ecu_id} heartbeat loop stopped")
+            logger.info(f"ECU {self.ecu_id} 心跳循环停止")
     
     async def _send_heartbeat(self):
         """发送心跳"""
@@ -508,12 +523,11 @@ class BaseECU(ABC):
                 "stats": self._stats.copy()
             }
             
-            # 保存到数据库
-            if self.db_client and self.config.enable_logging:
-                try:
-                    await self.db_client.save_heartbeat(self.ecu_id, heartbeat_data)
-                except Exception as e:
-                    logger.error(f"保存心跳到数据库失败: {e}")
+            # 更新数据库
+            try:
+                await ECUDeviceDAO.update_device_status(self.ecu_id, self.status.value)
+            except Exception as e:
+                logger.error(f"更新数据库心跳失败: {e}")
             
             # 发送心跳通知（如果有回调）
             for callback in self._command_callbacks:
@@ -525,7 +539,7 @@ class BaseECU(ABC):
                 except Exception as e:
                     logger.error(f"心跳回调执行失败: {e}")
             
-            logger.debug(f"ECU {self.ecu_id} heartbeat sent")
+            logger.debug(f"ECU {self.ecu_id} 心跳发送")
             
         except Exception as e:
             logger.error(f"发送心跳失败: {e}")
@@ -547,19 +561,14 @@ class BaseECU(ABC):
         """记录命令执行"""
         # 可以扩展为保存到数据库或日志
         if self.db_client and self.config.enable_logging:
-            execution_record = {
-                "command_id": command_data.get("command_id"),
-                "ecu_id": self.ecu_id,
-                "command": command_data.get("command"),
-                "params": command_data.get("params", {}),
-                "result": result,
-                "execution_time": datetime.now(),
-                "success": result.get("success", False)
-            }
-            
             # 异步保存执行记录
             asyncio.create_task(
-                self.db_client.save_command_execution(execution_record)
+                self.db_client.save_command_execution({
+                    "ecu_id": self.ecu_id,
+                    "command": command_data.get("command"),
+                    "params": command_data.get("params", {}),
+                    "result": result
+                })
             )
     
     async def get_diagnostics(self) -> Dict:
@@ -584,13 +593,3 @@ class BaseECU(ABC):
     def get_attribute(self, key: str, default: Any = None) -> Any:
         """获取设备属性"""
         return self._attributes.get(key, default)
-    
-    def __del__(self):
-        """析构函数"""
-        try:
-            if self._processing_task and not self._processing_task.done():
-                self._processing_task.cancel()
-            if self._heartbeat_task and not self._heartbeat_task.done():
-                self._heartbeat_task.cancel()
-        except:
-            pass

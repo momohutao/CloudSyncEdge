@@ -3,13 +3,16 @@ import sys
 import os
 from typing import Dict, List, Any
 
-from  interface import SouthboundInterface
+from  .interface import SouthboundInterface
 from  ..ecu_lib.interfaces.ecu_interface import ECUInterface
 from ..src.protocol.message_types import *
 class SouthboundInterfaceImpl(SouthboundInterface):
     def __init__(self,server_instance=None):
         #依赖成员A的接口
-        self.ecu_interface=ECUInterface()
+        from ..ecu_lib.interfaces.ecu_interface import DefaultECUInterface
+        from ..ecu_lib.devices.device_registry import DeviceRegistry
+        device_registry = DeviceRegistry()  # 或者从其他地方获取
+        self.ecu_interface = DefaultECUInterface(device_registry)
         #WebSocket服务器管理实例
         self.server=server_instance
         #本地设备管理

@@ -9,7 +9,7 @@ class SouthboundConfig:
     USE_MOCK_PROTOCOL = True  # 是否使用Mock协议
     # WebSocket服务器配置
     WS_HOST = "0.0.0.0"
-    WS_PORT = 8081
+    WS_PORT = 8082
     WS_PATH = "/ws/ecu"
     # 连接配置
     MAX_CONNECTIONS = 1000

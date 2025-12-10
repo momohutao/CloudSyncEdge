@@ -1,0 +1,17 @@
+# 数据库
+aiomysql>=0.2.0
+
+# Web框架（如果还没有的话）
+sanic>=23.6.0
+websockets>=12.0
+
+# 工具类
+python-dotenv>=1.0.0
+pytz>=2023.3
+
+# 开发依赖
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+black>=23.9.0
+flake8>=6.1.0
