@@ -1,18 +1,15 @@
 """
 ECU模拟器 - 用于测试和开发的ECU设备模拟
 """
-import asyncio
 import random
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable, Awaitable
+from typing import Dict, List, Optional, Callable
 from enum import Enum
-import json
 
-from protocol.message_types import MessageTypes, ErrorCodes, DeviceTypes, DeviceStatus
+from CloudSyncEdge.src.protocol.message_types import MessageTypes, DeviceTypes
 
-from .base_ecu import BaseECU, ECUConfig, ECUStatus
-from .ecu_factory import ECUFactory
+from .base_ecu import BaseECU
 from ..database.client import DatabaseClient
 
 logger = logging.getLogger(__name__)

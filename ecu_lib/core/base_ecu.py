@@ -101,6 +101,12 @@ class BaseECU(ABC):
         
         # 回调函数
         self._status_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
+        # status_callbacks 是一个列表，存放所有状态回调函数
+        # 每个回调函数必须：
+        # 1. 接受一个字典参数
+        # 2. 是异步函数（async def）
+        # 3. 不返回值（返回 None）
+
         self._command_callbacks: List[Callable[[Dict], Awaitable[None]]] = []
         
         # 统计信息

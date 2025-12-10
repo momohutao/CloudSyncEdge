@@ -1,13 +1,12 @@
 """
 ECU工厂类 - 负责创建和管理ECU设备实例
 """
-import asyncio
 import logging
-from typing import Dict, List, Optional, Type, Any, Union
+from typing import Dict, List, Optional, Type
 from enum import Enum
 import importlib
 
-from protocol.message_types import DeviceTypes, MessageTypes, ErrorCodes
+from CloudSyncEdge.src.protocol.message_types import DeviceTypes, MessageTypes
 
 from .base_ecu import BaseECU, ECUConfig
 from ..devices.shared_bike import SharedBikeECU
