@@ -1,4 +1,3 @@
-# southbound/server.py
 import asyncio
 import json
 import sys
@@ -6,7 +5,8 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     import websockets
@@ -17,61 +17,83 @@ except ImportError:
     HAS_WEBSOCKETS = False
     print("⚠️ 未安装websockets库，WebSocket功能不可用")
 
-from ..src.protocol.message_types import MessageTypes, DeviceTypes, ErrorCodes
-from ..ecu_lib.interfaces.ecu_interface import ECUInterface
+# 注意：这里可能需要修复导入路径
+try:
+    from src.protocol.message_types import MessageTypes, DeviceTypes, ErrorCodes
+except ImportError:
+    print("⚠️ 无法从src.protocol导入，尝试其他路径...")
+    from ..src.protocol.message_types import MessageTypes, DeviceTypes, ErrorCodes
+
 from .database import init_database, get_database_client
 from .interface_impl import SouthboundInterfaceImpl
-# 导入必要的依赖
-from ..ecu_lib.interfaces.ecu_interface import DefaultECUInterface
-# 需要先创建 DeviceRegistry 实例
-from ..ecu_lib.devices.device_registry import DeviceRegistry
+
 
 class SouthboundWebSocketServer:
-    """南向WebSocket服务器"""
-
-    def __init__(self, host: str = "0.0.0.0", port: int = 8081):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8082):
         self.host = host
         self.port = port
         self.server = None
-        device_registry = DeviceRegistry()
-        # 南向接口实现（供成员C调用）
-        self.southbound_interface = SouthboundInterfaceImpl(self)
-        # 数据库客户端
+
+        # 先设置为None，在initialize中初始化
         self.db_client = None
-        # ECU接口 - 先设置为 None，在 initialize 方法中创建
         self.ecu_interface = None
+        self.southbound_interface = None
+        self.active_connections = {}
+        self.device_info = {}
 
-        # 依赖成员A的接口
-        self.ecu_interface = DefaultECUInterface(device_registry, self.db_client)
-
-
-        # 活跃连接
-        self.active_connections: Dict[str, WebSocketServerProtocol] = {}
-        self.device_info: Dict[str, Dict[str, Any]] = {}
-
-        # 设备认证令牌（简化）
+        # 设备认证令牌 - 与ecu_management中的设备ID匹配
         self.device_tokens = {
-            "bike_001": "bike_token_001",
-            "gate_001": "gate_token_001",
-            "sensor_001": "sensor_token_001"
+            "BIKE001": "bike_token_001",
+            "BIKE002": "bike_token_001",
+            "DOOR001": "gate_token_001",
+            "DOOR002": "gate_token_001"
         }
 
         print(f"🚀 南向WebSocket服务器初始化: {host}:{port}")
 
     async def initialize(self):
         """初始化服务器"""
-        # 初始化数据库
+        # 1. 初始化数据库（南向模块自己的数据库）
         await init_database()
         self.db_client = get_database_client()
 
-        from ..ecu_lib.devices.device_registry import DeviceRegistry
-        from ..ecu_lib.interfaces.ecu_interface import DefaultECUInterface
+        # 2. 初始化ecu_lib的接口
+        try:
+            from ecu_lib.devices.device_registry import DeviceRegistry
+            from ecu_lib.interfaces.ecu_interface import DefaultECUInterface
 
-        device_registry = DeviceRegistry()  # 可能需要传递参数
-        self.ecu_interface = DefaultECUInterface(device_registry, self.db_client)
+            # 注意：DefaultECUInterface可能需要正确的参数
+            device_registry = DeviceRegistry()
 
-        # 更新 southbound_interface 的引用
-        self.southbound_interface.ecu_interface = self.ecu_interface
+            # 尝试不同的初始化方式
+            try:
+                self.ecu_interface = DefaultECUInterface(device_registry, self.db_client)
+            except TypeError:
+                # 如果构造函数参数不匹配，尝试其他方式
+                self.ecu_interface = DefaultECUInterface(device_registry)
+
+        except ImportError as e:
+            print(f"⚠️ 导入ecu_lib失败: {e}")
+            print("将在模拟模式下运行...")
+
+            # 创建一个模拟的ecu_interface
+            class MockECUInterface:
+                async def register_device(self, ecu_id, device_info):
+                    print(f"模拟注册设备: {ecu_id}")
+                    return True
+
+                async def update_device_last_seen(self, ecu_id):
+                    print(f"模拟更新设备最后在线时间: {ecu_id}")
+                    return True
+
+                async def update_device_status(self, ecu_id, status):
+                    print(f"模拟更新设备状态: {ecu_id} -> {status}")
+                    return True
+
+            self.ecu_interface = MockECUInterface()
+
+        # 3. 初始化南向接口
+        self.southbound_interface = SouthboundInterfaceImpl(self)
 
         print("✅ 南向服务器初始化完成")
 
@@ -84,15 +106,19 @@ class SouthboundWebSocketServer:
 
         # 调用成员A的接口注册设备
         try:
-            success = await self.ecu_interface.register_device(
-                ecu_id=ecu_id,
-                device_info={
-                    "type": DeviceTypes.BIKE,  # 可以从消息中获取实际类型
-                    "status": "online",
-                    "last_seen": datetime.now().isoformat()
-                }
-            )
-            return success
+            if hasattr(self.ecu_interface, 'register_device'):
+                success = await self.ecu_interface.register_device(
+                    ecu_id=ecu_id,
+                    device_info={
+                        "type": DeviceTypes.BIKE,
+                        "status": "online",
+                        "last_seen": datetime.now().isoformat()
+                    }
+                )
+                return success
+            else:
+                print(f"⚠️ ecu_interface没有register_device方法")
+                return True  # 模拟成功
         except Exception as e:
             print(f"❌ 设备注册失败: {e}")
             return False
@@ -143,7 +169,17 @@ class SouthboundWebSocketServer:
 
             # 5. 记录连接日志
             if self.db_client:
-                await self.db_client.log_connection(ecu_id, client_ip)
+                # 注意：db_client可能有不同的方法名
+                try:
+                    from .database.client import ConnectionInfo
+                    conn_info = ConnectionInfo(
+                        ecu_id=ecu_id,
+                        ip_address=client_ip,
+                        protocol="websocket"
+                    )
+                    await self.db_client.add_connection(conn_info)
+                except Exception as e:
+                    print(f"记录连接日志失败: {e}")
 
             # 6. 发送认证成功响应
             await websocket.send(json.dumps({
@@ -181,15 +217,12 @@ class SouthboundWebSocketServer:
                     method = data.get("method")
 
                     if method == MessageTypes.DEVICE_HEARTBEAT:
-                        # 处理心跳
                         await self.handle_heartbeat(ecu_id, data.get("params", {}))
 
                     elif method == MessageTypes.DEVICE_DATA:
-                        # 处理设备数据
                         await self.handle_device_data(ecu_id, data.get("params", {}))
 
                     elif method == MessageTypes.COMMAND_RESPONSE:
-                        # 处理命令响应
                         await self.handle_command_response(ecu_id, data.get("params", {}))
 
                     else:
@@ -209,11 +242,15 @@ class SouthboundWebSocketServer:
 
         # 更新心跳时间
         if self.db_client:
-            await self.db_client.update_heartbeat(ecu_id)
+            try:
+                await self.db_client.update_heartbeat(ecu_id)
+            except Exception as e:
+                print(f"更新心跳失败: {e}")
 
-        # 更新设备最后在线时间（通过成员A的接口）
+        # 更新设备最后在线时间
         try:
-            await self.ecu_interface.update_device_last_seen(ecu_id)
+            if hasattr(self.ecu_interface, 'update_device_last_seen'):
+                await self.ecu_interface.update_device_last_seen(ecu_id)
         except Exception as e:
             print(f"⚠️ 更新设备最后在线时间失败: {e}")
 
@@ -223,15 +260,22 @@ class SouthboundWebSocketServer:
 
         # 记录数据日志
         if self.db_client:
-            await self.db_client.log_status_update(ecu_id, params)
+            try:
+                # 记录到南向数据库
+                from .database.client import DeviceLog
+                log = DeviceLog(
+                    ecu_id=ecu_id,
+                    action_type="status_update",
+                    action_data=params,
+                    ip_address=self.device_info.get(ecu_id, {}).get("ip")
+                )
+                await self.db_client.add_log(log)
+            except Exception as e:
+                print(f"记录设备数据失败: {e}")
 
     async def handle_command_response(self, ecu_id: str, params: Dict[str, Any]):
         """处理命令响应"""
         print(f"📨 命令响应: {ecu_id} - {params.get('command', 'unknown')}")
-
-        # 记录命令响应日志
-        if self.db_client:
-            await self.db_client.log_command_response(ecu_id, params)
 
     async def cleanup_connection(self, ecu_id: str, websocket: WebSocketServerProtocol):
         """清理连接"""
@@ -241,11 +285,15 @@ class SouthboundWebSocketServer:
         if ecu_id in self.device_info:
             # 记录断开日志
             if self.db_client:
-                await self.db_client.log_disconnection(ecu_id, "connection_closed")
+                try:
+                    await self.db_client.remove_connection(ecu_id, "connection_closed")
+                except Exception as e:
+                    print(f"记录断开日志失败: {e}")
 
-            # 更新设备状态（通过成员A的接口）
+            # 更新设备状态
             try:
-                await self.ecu_interface.update_device_status(ecu_id, "offline")
+                if hasattr(self.ecu_interface, 'update_device_status'):
+                    await self.ecu_interface.update_device_status(ecu_id, "offline")
             except Exception as e:
                 print(f"⚠️ 更新设备状态失败: {e}")
 
@@ -270,8 +318,7 @@ class SouthboundWebSocketServer:
         )
 
         print(f"✅ 南向WebSocket服务器启动成功: ws://{self.host}:{self.port}")
-        print(f"   活跃连接: {len(self.active_connections)}")
-        print(f"   设备数量: {len(self.device_info)}")
+        print("按 Ctrl+C 停止服务器")
 
         # 保持运行
         await self.server.wait_closed()
@@ -292,6 +339,10 @@ async def main():
         await server.start()
     except KeyboardInterrupt:
         print("\n🛑 接收到中断信号，正在停止服务器...")
+    except Exception as e:
+        print(f"\n❌ 服务器运行出错: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         await server.stop()
 

@@ -8,7 +8,7 @@ from typing import Dict, Optional, List, Any
 import logging
 
 from ..core.base_ecu import BaseECU, ECUConfig, CommandResult
-from ...src.protocol.message_types import MessageTypes, ErrorCodes, DeviceTypes
+from ..protocol.message_types import MessageTypes, ErrorCodes, DeviceTypes
 
 logger = logging.getLogger(__name__)
 

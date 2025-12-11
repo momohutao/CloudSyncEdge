@@ -7,8 +7,7 @@ LOCAL_MYSQL_CONFIG = {
     "host": "localhost",
     "port": 3307,
     "user": "root",
-    # "password": "20051025",
-"password": "123456",
+    "password": "123456",
     "db": "test_ecu"
 }
 

@@ -17,10 +17,9 @@ async def create_database():
     try:
         conn = await aiomysql.connect(
             host='localhost',
-            port=3307,#看你的docker中的mysql映射到哪
+            port=3307,
             user='root',
-            # password='20051025'
-            password='123456'#你的数据库密码
+            password='root123456'
         )
         print("✅ 连接到MySQL服务器")
     except Exception as e:
@@ -128,9 +127,9 @@ async def verify_database():
         # 使用 aiomysql 直接连接
         conn = await aiomysql.connect(
             host='localhost',
-            port=3307,
+            port=3306,
             user='root',
-            password='123456',
+            password='root123456',
             db='ecu_management'
         )
         

@@ -22,7 +22,7 @@ class SimpleDB:
         'host': 'localhost',
         'port': 3307,
         'user': 'root',
-        'password': '123456',
+        'password': 'root123456',
         'db': 'ecu_management',
         'autocommit': True,
         'minsize': 1,
